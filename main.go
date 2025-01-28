@@ -5,13 +5,14 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 )
 
 func main() {
     nFlag := flag.String("n", "", "Number of lines to display")
-    bytes := flag.String("c", "", "Number of bytes to display (overrides -n)")
+    cFlag := flag.String("c", "", "Number of cFlag to display (overrides -n)")
 
     flag.Parse()
 
@@ -31,17 +32,17 @@ func main() {
         os.Exit(1)
     }
 
-    if *nFlag != "" && *bytes != "" {
+    if *nFlag != "" && *cFlag != "" {
         fmt.Println("Error: You can pass only one flag (-n or -c) at a time")
     }
 
-    if *nFlag == "" && *bytes == "" {
+    if *nFlag == "" && *cFlag == "" {
         *nFlag = "10"
     }
 
-    contents := readFileContents(file)
 
     if *nFlag != "" {
+        contents := readLines(file)
         lines, err := strconv.Atoi(*nFlag)
         if err != nil {
             fmt.Println("Error: Invalid number for -n flag")
@@ -51,20 +52,51 @@ func main() {
             for _, line := range contents[lines:] {
                 fmt.Println(line)
             }
-        }
-
-        for _, line := range contents[len(contents) - lines:] {
-            fmt.Println(line)
+        } else {
+            for _, line := range contents[len(contents) - lines:] {
+                fmt.Println(line)
+            }
         }
     }
 
+    if *cFlag != "" {
+        chars, err := strconv.Atoi(*cFlag)
+        if err != nil {
+            fmt.Println("Error: Invalid number for -c flag")
+        }
+
+        if strings.HasPrefix(*cFlag, "+") {
+            contents := make([]byte, chars)
+            _, err := file.Read(contents)
+            if err != nil {
+                fmt.Println("Error reading file: ", err.Error())
+            }
+            fmt.Println(string(contents))
+        } else {
+            fileSize, _ := file.Stat()
+            fmt.Println(chars)
+            useros := runtime.GOOS
+            if useros != "windows" {
+                _, _ = file.Seek(fileSize.Size() - int64(chars), 0)
+            } else {
+                _, _ = file.Seek(fileSize.Size() - int64(chars + 2), 0)
+            }
+            contents := make([]byte, chars)
+            _, err := file.Read(contents)
+            fmt.Println(len(contents))
+            if err != nil {
+                fmt.Println("Error reading file: ", err.Error())
+            }
+            fmt.Println(string(contents))
+        }
+    }
 }
 
-func readFileContents(file *os.File) []string {
-    var contents []string
+func readLines(file *os.File) []string {
+    var lines []string
     scanner := bufio.NewScanner(file)
     for scanner.Scan() {
-        contents = append(contents, scanner.Text())
+        lines = append(lines, scanner.Text())
     }
-    return contents
+    return lines
 }
