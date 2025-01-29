@@ -12,9 +12,12 @@ import (
 	"sync"
 )
 
+// TODO: Add a flag to show line numbers when output
+// TODO: Use channels to communicate data between main and other routines
+
 func main() {
-    nFlag := flag.String("n", "", "Number of lines to display")
-    cFlag := flag.String("c", "", "Number of cFlag to display (overrides -n)")
+    lineFlag := flag.String("n", "", "Number of lines to display")
+    byteFlag := flag.String("c", "", "Number of byteFlag to display (overrides -n)")
     flag.Parse()
 
     args := flag.Args();
@@ -23,6 +26,16 @@ func main() {
         os.Exit(1)
     }
 
+    if *lineFlag != "" && *byteFlag != "" {
+        fmt.Println("go-tail: Error => You can pass only one flag (-n or -c) at a time")
+        return
+    }
+
+    if *lineFlag == "" && *byteFlag == "" {
+        *lineFlag = "10"
+    }
+
+    ch := make(chan []string)
     var wg sync.WaitGroup
     for _, path := range args {
         wg.Add(1)
@@ -35,80 +48,90 @@ func main() {
                 return
             }
             defer file.Close()
-
             file = removeBOM(file)
 
-            if *nFlag != "" && *cFlag != "" {
-                fmt.Println("Error: You can pass only one flag (-n or -c) at a time")
+            if *byteFlag != "" {
+                tailBytes(ch, file, byteFlag, path)
                 return
             }
-
-            if *nFlag == "" && *cFlag == "" {
-                *nFlag = "10"
-            }
-
-            if *cFlag != "" {
-                charOffset, err := strconv.Atoi(*cFlag)
-                if err != nil {
-                    fmt.Println("Error: Invalid number for -c flag")
-                    return
-                }
-
-                fileInfo, err := file.Stat()
-                if err != nil {
-                    fmt.Println("go-tail: Error reading file: ", err.Error())
-                    return
-                }
-
-                switch {
-                case fileInfo.Size() < int64(charOffset):
-                    charOffset = int(fileInfo.Size())
-                case !strings.HasPrefix(*cFlag, "+"):
-                    if runtime.GOOS == "windows" {
-                        charOffset = charOffset + 2
-                    }
-                    _, err = file.Seek(fileInfo.Size() - int64(charOffset), 0)
-                    if err != nil {
-                        fmt.Println("go-tail: Error reading file: ", err.Error())
-                        return
-                    }
-                }
-
-                bytesToDisplay := make([]byte, charOffset)
-                _, err = file.Read(bytesToDisplay)
-                if err != nil {
-                    fmt.Println("go-tail: Error reading file: ", err.Error())
-                    return
-                }
-                fmt.Println(string(bytesToDisplay))
-                return
-            }
-
-            offset, err := strconv.Atoi(*nFlag)
-            if err != nil {
-                fmt.Println("Error: Invalid number for -n flag")
-                return
-            }
-
-            lines := readLines(file)
-            var linesToDisplay []string
-
-            switch {
-            case len(lines) < offset:
-                linesToDisplay = lines
-            case strings.HasPrefix(*nFlag, "+"):
-                linesToDisplay = lines[offset:]
-            default:
-                linesToDisplay = lines[len(lines) - offset:]
-            }
-
-            fmt.Printf("==>%v<==\n", path)
-            for _, line := range linesToDisplay {
-                fmt.Println(line)
-            }
+            tailLines(ch, file, lineFlag, path)
         }(path)
     }
-    wg.Wait()
+
+    go func() {
+        wg.Wait()
+        close(ch)
+    }()
+    for t := range ch {
+        for _, lod := range t {
+            fmt.Println(lod)
+        }
+    }
+}
+
+func tailBytes(ch chan <- []string, file *os.File, flg *string, path string) {
+    byteOffset, err := strconv.Atoi(*flg)
+    if err != nil {
+        fmt.Println("go-tail: Error => Invalid number for -c flag")
+        return
+    }
+
+    fileInfo, err := file.Stat()
+    if err != nil {
+        fmt.Println("go-tail: Error reading file: ", err.Error())
+        return
+    }
+
+    switch {
+    case fileInfo.Size() < int64(byteOffset):
+        byteOffset = int(fileInfo.Size())
+    case !strings.HasPrefix(*flg, "+"):
+        if runtime.GOOS == "windows" {
+            byteOffset = byteOffset + 1
+        }
+        _, err = file.Seek(fileInfo.Size() - int64(byteOffset), 0)
+        if err != nil {
+            fmt.Println("go-tail: Error reading file: ", err.Error())
+            return
+        }
+    }
+
+    bytesToDisplay := make([]byte, byteOffset)
+    _, err = file.Read(bytesToDisplay)
+    if err != nil {
+        fmt.Println("go-tail: Error reading file: ", err.Error())
+        return
+    }
+
+    title := fmt.Sprintf("\n==>%v<==\n", path)
+    data := []string { title, string(bytesToDisplay) }
+    ch <- data
+    return
+}
+
+func tailLines(ch chan <- []string, file *os.File, flg *string, path string) {
+    offset, err := strconv.Atoi(*flg)
+    if err != nil {
+        fmt.Println("go-tail: Error => Invalid number for -n flag")
+        return
+    }
+
+    lines := readLines(file)
+    var linesToDisplay []string
+
+    switch {
+    case len(lines) < offset:
+        linesToDisplay = lines
+    case strings.HasPrefix(*flg, "+"):
+        linesToDisplay = lines[offset:]
+    default:
+        linesToDisplay = lines[len(lines) - offset:]
+    }
+
+
+    title := fmt.Sprintf("\n==>%v<==\n", path)
+    data := append([]string{title}, linesToDisplay...)
+    ch <- data
 }
 
 func readLines(file *os.File) []string {
