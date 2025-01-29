@@ -13,7 +13,6 @@ import (
 func main() {
     nFlag := flag.String("n", "", "Number of lines to display")
     cFlag := flag.String("c", "", "Number of cFlag to display (overrides -n)")
-
     flag.Parse()
 
     args := os.Args;
@@ -23,72 +22,80 @@ func main() {
     }
 
     path := args[len(args) - 1]
-
     file, err := os.Open(path)
-    defer file.Close()
-
     if err != nil {
-        fmt.Println("An error occured while reading the file: ", err.Error())
-        os.Exit(1)
+        fmt.Println("Error reading the file: ", err.Error())
+        return
     }
+    defer file.Close()
 
     if *nFlag != "" && *cFlag != "" {
         fmt.Println("Error: You can pass only one flag (-n or -c) at a time")
+        return
     }
 
     if *nFlag == "" && *cFlag == "" {
         *nFlag = "10"
     }
 
-
-    if *nFlag != "" {
-        contents := readLines(file)
-        lines, err := strconv.Atoi(*nFlag)
-        if err != nil {
-            fmt.Println("Error: Invalid number for -n flag")
-        }
-
-        if strings.HasPrefix(*nFlag, "+"){
-            for _, line := range contents[lines:] {
-                fmt.Println(line)
-            }
-        } else {
-            for _, line := range contents[len(contents) - lines:] {
-                fmt.Println(line)
-            }
-        }
-    }
-
     if *cFlag != "" {
-        chars, err := strconv.Atoi(*cFlag)
+        charOffset, err := strconv.Atoi(*cFlag)
         if err != nil {
             fmt.Println("Error: Invalid number for -c flag")
+            return
         }
 
-        if strings.HasPrefix(*cFlag, "+") {
-            contents := make([]byte, chars)
-            _, err := file.Read(contents)
-            if err != nil {
-                fmt.Println("Error reading file: ", err.Error())
-            }
-            fmt.Println(string(contents))
-        } else {
-            fileSize, _ := file.Stat()
-            fmt.Println(chars)
-            useros := runtime.GOOS
-            if useros != "windows" {
-                _, _ = file.Seek(fileSize.Size() - int64(chars), 0)
-            } else {
-                _, _ = file.Seek(fileSize.Size() - int64(chars + 2), 0)
-            }
-            contents := make([]byte, chars)
-            _, err := file.Read(contents)
-            fmt.Println(len(contents))
-            if err != nil {
-                fmt.Println("Error reading file: ", err.Error())
-            }
-            fmt.Println(string(contents))
+        fileInfo, err := file.Stat()
+        if err != nil {
+            fmt.Println("Error reading file: ", err.Error())
+            return
         }
+
+        switch {
+        case fileInfo.Size() < int64(charOffset):
+            charOffset = int(fileInfo.Size())
+        case !strings.HasPrefix(*cFlag, "+"):
+            if runtime.GOOS == "windows" {
+                charOffset = charOffset + 2
+            }
+            _, err = file.Seek(fileInfo.Size() - int64(charOffset), 0)
+            if err != nil {
+                fmt.Println("Error reading file: ", err.Error())
+                return
+            }
+        }
+
+        bytesToDisplay := make([]byte, charOffset)
+        _, err = file.Read(bytesToDisplay)
+        if err != nil {
+            fmt.Println("Error reading file: ", err.Error())
+            return
+        }
+        fmt.Println(string(bytesToDisplay))
+        return
+    }
+
+
+    offset, err := strconv.Atoi(*nFlag)
+    if err != nil {
+        fmt.Println("Error: Invalid number for -n flag")
+        return
+    }
+
+    lines := readLines(file)
+    var linesToDisplay []string
+
+    switch {
+    case len(lines) < offset:
+        linesToDisplay = lines
+    case strings.HasPrefix(*nFlag, "+"):
+        linesToDisplay = lines[offset:]
+    default:
+        linesToDisplay = lines[len(lines) - offset:]
+    }
+
+    for _, line := range linesToDisplay {
+        fmt.Println(line)
     }
 }
 
